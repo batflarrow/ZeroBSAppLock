@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+option java_package = "com.batflarrow.zerobs.applock.data";
+option java_multiple_files = true;
+
+message AppData {
+  string app_name = 1;
+  int64 lock_timestamp = 2;
+  int64 last_authentication_timestamp = 3;
+}
+
+message LockedAppsMapProto {
+  map<string, AppData> locked_apps = 1;  // package_name -> AppData
+} 

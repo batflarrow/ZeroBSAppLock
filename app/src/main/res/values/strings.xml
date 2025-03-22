@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">ZeroBsLock</string>
+    <string name="accessibility_service_description">This service monitors app launches to protect your locked apps with biometric authentication.</string>
+</resources>
