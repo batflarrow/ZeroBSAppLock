@@ -2,9 +2,9 @@ package com.batflarrow.zerobs.applock.ui
 
 import android.content.Intent
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.provider.Settings
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -27,6 +27,7 @@ class LockScreenActivity : FragmentActivity() {
     private lateinit var biometricAuthHelper: BiometricAuthHelper
     private var packageName: String = ""
     private var appName: String = ""
+    private var hasOverlayPermission = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,9 +42,31 @@ class LockScreenActivity : FragmentActivity() {
             return
         }
 
+        // Check and request overlay permission if needed
+        hasOverlayPermission = Settings.canDrawOverlays(this)
+        if (!hasOverlayPermission) {
+            promptForOverlayPermission()
+            return
+        }
+        // Configure the window to appear as an overlay
+        window.setFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        )
+        // For overlay windows
+        window.attributes.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        // Handle status bar and system UI
+        window.decorView.post {
+            window.insetsController?.let { controller ->
+                controller.hide(android.view.WindowInsets.Type.statusBars())
+                controller.systemBarsBehavior =
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        }
+        // Show when locked
+        setShowWhenLocked(true)
         biometricAuthHelper = BiometricAuthHelper(this)
         biometricAuthHelper.registerForActivityResult(this)
-
         // Try to authenticate immediately if possible
         if (biometricAuthHelper.canAuthenticate()) {
             authenticateUser()
@@ -64,37 +87,26 @@ class LockScreenActivity : FragmentActivity() {
         }
     }
 
+    private fun promptForOverlayPermission() {
+        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+        startActivity(intent)
+        // Just finish this instance; user needs to grant permission first
+        finish()
+    }
+
     private fun authenticateUser() {
         biometricAuthHelper.showBiometricPrompt(
                 activity = this,
                 title = "Authenticate to unlock",
                 subtitle = "Unlock $appName",
-                onSuccess = { finishAndReturnToApp(packageName) }
+                onSuccess = { onAuthenticationSuccess() }
         )
     }
 
-    private fun finishAndReturnToApp(packageName: String) {
-        try {
-            // Tell the accessibility service this app is now authenticated
-            val accessibilityService = AppLockAccessibilityService.instance
-            accessibilityService?.setCurrentLockedApp(packageName)
-
-            // We need to explicitly launch the app again to ensure it opens
-            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-            if (launchIntent != null) {
-                launchIntent.addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                )
-                startActivity(launchIntent)
-            } else {
-                Log.e("LockScreenActivity", "Could not find launch intent for: $packageName")
-            }
-        } catch (e: Exception) {
-            Log.e("LockScreenActivity", "Error returning to app: $packageName", e)
-        }
-
-        // Finish our activity with a short delay to ensure the other app launches first
-        Handler(Looper.getMainLooper()).postDelayed({ finish() }, 100)
+    private fun onAuthenticationSuccess() {
+        val accessibilityService = AppLockAccessibilityService.instance
+        accessibilityService?.setCurrentLockedApp(packageName)
+        finishAffinity()
     }
 
     @Composable

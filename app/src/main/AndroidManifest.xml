@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="true"
@@ -27,8 +28,9 @@
         <activity
             android:name=".ui.LockScreenActivity"
             android:exported="false"
-            android:theme="@android:style/Theme.Material.NoActionBar"
-            android:launchMode="singleTask" />
+            android:theme="@style/Theme.Overlay"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true" />
         <service
             android:name=".service.AppLockAccessibilityService"
             android:exported="false"

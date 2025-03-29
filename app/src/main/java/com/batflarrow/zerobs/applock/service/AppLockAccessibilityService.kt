@@ -23,12 +23,12 @@ class AppLockAccessibilityService : AccessibilityService() {
     private var currentLockedApp: String? = null
     private var collectJob: Job? = null
 
-    // Authentication timeout (3 seconds)
-    private val AUTH_TIMEOUT_MS = 3 * 1000L
+    // Authentication timeout (2 seconds)
+    private val AUTH_TIMEOUT_MS = 2 * 1000L
 
     // Handler for delayed operations
     private val handler = Handler(Looper.getMainLooper())
-    private var pendingClearTask: Runnable? = null
+    private var pendingClearTasks = mutableListOf<Runnable>()
     private val APP_SWITCH_VERIFICATION_DELAY = 3000L
 
     override fun onCreate() {
@@ -94,11 +94,21 @@ class AppLockAccessibilityService : AccessibilityService() {
     fun setCurrentLockedApp(packageName: String) {
         Log.d(TAG, "Setting current locked app: $packageName")
         currentLockedApp = packageName
-
         // Record authentication in repository
         serviceScope.launch { repository.recordAuthentication(packageName) }
-
         reconfigureService()
+    }
+
+    private fun isHomeOrSystemUI(packageName: String): Boolean {
+        return packageName in
+                listOf(
+                        "com.android.launcher",
+                        "com.google.android.apps.nexuslauncher",
+                        "com.miui.home",
+                        "com.sec.android.app.launcher",
+                        "com.oppo.launcher",
+                        "com.android.settings"
+                )
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -106,86 +116,64 @@ class AppLockAccessibilityService : AccessibilityService() {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             return
         }
-
         val packageName = event.packageName?.toString() ?: return
-        val className = event.className?.toString() ?: ""
+        if (currentLockedApp == null) {
+            if (packageName in lockedPackages) {
+                Log.d(TAG, "Setting current locked app: $packageName")
+                Handler(Looper.getMainLooper()).post { launchLockScreen(packageName) }
 
-        // Cancel any pending clear task since we have a new event
-        pendingClearTask?.let {
-            handler.removeCallbacks(it)
-            pendingClearTask = null
-        }
-
-        // Handle system UI events specially (like back button)
-        if (packageName == "com.android.systemui") {
-            // Don't clear immediately, wait to see if we return to the locked app
-            if (currentLockedApp != null) {
-                pendingClearTask = Runnable {
-                    Log.d(TAG, "Confirmed app switch away from: $currentLockedApp")
-                    currentLockedApp = null
-                    reconfigureService()
-                    pendingClearTask = null
-                }
-
-                // Schedule the task to run after a short delay
-                handler.postDelayed(pendingClearTask!!, APP_SWITCH_VERIFICATION_DELAY)
+                reconfigureService()
             }
             return
         }
-
-        // If we're back in the currently locked app, cancel any pending clear
-        if (packageName == currentLockedApp) {
+        /**
+         * If the current locked app is the same as the package for which we received the event, we
+         * don't need to do anything.
+         */
+        if (currentLockedApp == packageName) {
+            // clear events that were launched to mark the app as locked
+            clearPendingTasks()
             return
         }
 
-        // If we have a current locked app and we're now in a different app
-        // (not system UI and not our own app)
-        if (currentLockedApp != null &&
-                        packageName != currentLockedApp &&
-                        packageName != this.packageName
-        ) {
-            Log.d(TAG, "User switched from locked app: $currentLockedApp to: $packageName")
-            currentLockedApp = null
+        Log.d(
+                TAG,
+                "Full screen event from a non locked APP when we've already locked an APP ${event.toString()}"
+        )
+        if (packageName in lockedPackages && currentLockedApp != packageName) {
+            Log.d(TAG, "Setting current locked app: $packageName")
+            clearPendingTasks()
+            Handler(Looper.getMainLooper()).post { launchLockScreen(packageName) }
             reconfigureService()
             return
         }
 
-        // Skip our own app
-        if (packageName == this.packageName) {
+        if (!isHomeOrSystemUI(packageName)) {
+            Log.d(TAG, "Not a home or system UI, skipping")
             return
         }
-
-        // Check if this is a locked app
-        if (packageName !in lockedPackages) {
-            return
-        }
-
-        // Check if app was recently authenticated
-        serviceScope.launch {
-            val wasRecentlyAuthenticated =
-                    repository.wasRecentlyAuthenticated(packageName, AUTH_TIMEOUT_MS)
-
-            if (wasRecentlyAuthenticated) {
-                // Update on main thread
-                Handler(Looper.getMainLooper()).post {
-                    // Consider this app as the current locked app
-                    if (currentLockedApp != packageName) {
-                        currentLockedApp = packageName
-                        reconfigureService()
-                    }
-                }
-                return@launch
+        /**
+         * Mark the APP as locked again set currentLockedApp to null. Wait for some time to perform
+         * this operation to avoid cases when we switch back to the locked app and we're not sure if
+         * the user is in the lock screen or not.
+         */
+        val clearTask = Runnable {
+            if (currentLockedApp != null) {
+                Log.d(TAG, "Confirmed app switch away from: $currentLockedApp")
+                currentLockedApp = null
+                reconfigureService()
             }
-
-            // Not recently authenticated, launch lock screen
-            Handler(Looper.getMainLooper()).post { launchLockScreen(packageName) }
         }
+        pendingClearTasks.add(clearTask)
+        handler.postDelayed(clearTask, AUTH_TIMEOUT_MS)
     }
 
     private fun launchLockScreen(packageName: String) {
         val intent =
                 Intent(this, LockScreenActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    // These flags will clear existing activities and create a new task
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+
                     putExtra(LockScreenActivity.EXTRA_PACKAGE_NAME, packageName)
 
                     val appName =
@@ -212,10 +200,17 @@ class AppLockAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        pendingClearTask?.let { handler.removeCallbacks(it) }
+        // Cancel all pending clear tasks
+        clearPendingTasks()
         collectJob?.cancel()
         instance = null
         Log.d(TAG, "Accessibility service destroyed")
+    }
+
+    // Add this helper function to clear pending tasks
+    private fun clearPendingTasks() {
+        pendingClearTasks.forEach { task -> handler.removeCallbacks(task) }
+        pendingClearTasks.clear()
     }
 
     companion object {

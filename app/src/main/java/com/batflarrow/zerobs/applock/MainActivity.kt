@@ -26,6 +26,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
 
         // Check if service is running and only show dialog if needed
+        checkOverlayPermission()
         if (!isAccessibilityServiceEnabled()) {
             Log.d("MainActivity", "Accessibility service is NOT enabled")
             showAccessibilityServiceDialog()
@@ -64,20 +65,39 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun isAccessibilityServiceEnabled(): Boolean {
-        // Get the AccessibilityManager
         val accessibilityManager =
                 getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-
-        // Get all the enabled accessibility services
         val enabledServices =
                 accessibilityManager.getEnabledAccessibilityServiceList(
                         AccessibilityServiceInfo.FEEDBACK_ALL_MASK
                 )
 
-        // The service ID we're looking for
-        val serviceId = "${packageName}/${AppLockAccessibilityService::class.java.canonicalName}"
+        for (enabledService in enabledServices) {
+            val enabledServiceInfo = enabledService.getResolveInfo().serviceInfo
+            if (enabledServiceInfo.packageName.equals(packageName) &&
+                            enabledServiceInfo.name.equals(
+                                    AppLockAccessibilityService::class.java.canonicalName
+                            )
+            )
+                    return true
+        }
+        return false
+    }
 
-        // Check if our service is in the list of enabled services
-        return enabledServices.any { serviceInfo -> serviceInfo.id == serviceId }
+    private fun checkOverlayPermission() {
+        if (!Settings.canDrawOverlays(this)) {
+            AlertDialog.Builder(this)
+                    .setTitle("Overlay Permission Required")
+                    .setMessage(
+                            "This app needs permission to display over other apps for the app lock feature to work properly."
+                    )
+                    .setPositiveButton("Open Settings") { _, _ ->
+                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                        startActivity(intent)
+                    }
+                    .setCancelable(false)
+                    .create()
+                    .show()
+        }
     }
 }
