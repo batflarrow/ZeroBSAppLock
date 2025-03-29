@@ -172,7 +172,10 @@ class AppLockAccessibilityService : AccessibilityService() {
         val intent =
                 Intent(this, LockScreenActivity::class.java).apply {
                     // These flags will clear existing activities and create a new task
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    flags =
+                            Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                    Intent.FLAG_ACTIVITY_NO_HISTORY
 
                     putExtra(LockScreenActivity.EXTRA_PACKAGE_NAME, packageName)
 
