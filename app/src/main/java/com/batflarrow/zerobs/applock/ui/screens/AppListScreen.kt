@@ -58,7 +58,7 @@ fun AppListScreen() {
     // Load apps asynchronously when the component is first composed
     LaunchedEffect(includeSystemApps) {
         withContext(Dispatchers.IO) {
-            val apps = getInstalledApps(packageManager, includeSystemApps)
+            val apps = getInstalledApps(packageManager, includeSystemApps, context.packageName)
             withContext(Dispatchers.Main) { allApps = apps }
         }
     }
@@ -248,12 +248,16 @@ fun AppIconPlaceholder(appName: String) {
 }
 
 // Get installed apps with package names
-fun getInstalledApps(packageManager: PackageManager, includeSystemApps: Boolean): List<AppInfo> {
+fun getInstalledApps(
+        packageManager: PackageManager,
+        includeSystemApps: Boolean,
+        currentAppPackageName: String
+): List<AppInfo> {
     return packageManager
             .getInstalledApplications(PackageManager.GET_META_DATA)
             .filter { appInfo ->
                 val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                includeSystemApps || !isSystemApp // Include system apps only if toggle is ON
+                (includeSystemApps || !isSystemApp) && appInfo.packageName != currentAppPackageName
             }
             .map {
                 AppInfo(

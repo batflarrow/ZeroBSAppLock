@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
-import android.util.Log
 import android.view.accessibility.AccessibilityManager
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -54,22 +53,14 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-
-        // Check permissions first
-        checkOverlayPermission()
-        if (!isAccessibilityServiceEnabled()) {
-            Log.d("MainActivity", "Accessibility service is NOT enabled")
-            showAccessibilityServiceDialog()
-        } else {
-            Log.d("MainActivity", "Accessibility service is enabled")
-            // Dismiss any existing dialog if the service is now enabled
-            accessibilityDialog?.dismiss()
-            accessibilityDialog = null
-        }
         // Authenticate the user if not already authenticated
         if (!isAuthenticated) {
             authenticateUser()
         }
+
+        // Check permissions first
+        checkOverlayPermission()
+        checkAccessibilityServicePermission()
     }
 
     private fun authenticateUser() {
@@ -134,6 +125,14 @@ class MainActivity : FragmentActivity() {
         return false
     }
 
+    private fun checkAccessibilityServicePermission() {
+        if (!isAccessibilityServiceEnabled()) {
+            showAccessibilityServiceDialog()
+            return
+        }
+        accessibilityDialog?.dismiss()
+    }
+
     private fun checkOverlayPermission() {
         if (!Settings.canDrawOverlays(this)) {
             AlertDialog.Builder(this)
@@ -148,6 +147,8 @@ class MainActivity : FragmentActivity() {
                     .setCancelable(false)
                     .create()
                     .show()
+            return
         }
+        accessibilityDialog?.dismiss()
     }
 }

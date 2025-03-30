@@ -20,7 +20,7 @@ class AppLockAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var repository: LockedAppsRepository
     private var lockedPackages = setOf<String>()
-    private var currentLockedApp: String? = null
+    private var currentUnLockedApp: String? = null
     private var collectJob: Job? = null
 
     // Authentication timeout (2 seconds)
@@ -67,12 +67,12 @@ class AppLockAccessibilityService : AccessibilityService() {
             val info = AccessibilityServiceInfo()
             info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
 
-            if (currentLockedApp != null) {
-                // If we have a locked app active, monitor all packages to detect when user leaves
+            if (currentUnLockedApp != null) {
+                // If we have a unlocked app active, monitor all packages to detect when user leaves
                 info.packageNames = null
-                Log.d(TAG, "Monitoring ALL packages (locked app is active: $currentLockedApp)")
+                Log.d(TAG, "Monitoring ALL packages (unlocked app is active: $currentUnLockedApp)")
             } else if (lockedPackages.isNotEmpty()) {
-                // Only monitor locked packages when no locked app is active
+                // Only monitor locked packages when no unlocked app is active
                 info.packageNames = lockedPackages.toTypedArray()
                 Log.d(TAG, "Monitoring ONLY: ${lockedPackages.joinToString()}")
             } else {
@@ -92,23 +92,39 @@ class AppLockAccessibilityService : AccessibilityService() {
     }
 
     fun setCurrentLockedApp(packageName: String) {
-        Log.d(TAG, "Setting current locked app: $packageName")
-        currentLockedApp = packageName
+        Log.d(TAG, "Setting current unlocked app: $packageName")
+        currentUnLockedApp = packageName
         // Record authentication in repository
         serviceScope.launch { repository.recordAuthentication(packageName) }
         reconfigureService()
     }
 
-    private fun isHomeOrSystemUI(packageName: String): Boolean {
-        return packageName in
-                listOf(
-                        "com.android.launcher",
-                        "com.google.android.apps.nexuslauncher",
-                        "com.miui.home",
-                        "com.sec.android.app.launcher",
-                        "com.oppo.launcher",
-                        "com.android.settings"
+    private fun isHomeOrSettings(packageName: String): Boolean {
+        val hardcodedLaunchers =
+                setOf(
+                        "com.google.android.apps.nexuslauncher", // Google Pixel Launcher
+                        "com.miui.home", // Xiaomi MIUI Launcher
+                        "com.sec.android.app.launcher", // Samsung One UI Home
+                        "com.huawei.android.launcher", // Huawei EMUI Launcher
+                        "com.oppo.launcher", // Oppo ColorOS Launcher
+                        "net.oneplus.launcher", // OnePlus Launcher
+                        "com.vivo.launcher", // Vivo FuntouchOS Launcher
+                        "com.sonyericsson.home", // Sony Xperia Home
+                        "com.asus.launcher", // ASUS ZenUI Launcher
+                        "com.realme.launcher", // Realme UI Launcher
+                        "com.motorola.launcher", // Motorola Launcher
+                        "com.lenovo.launcher", // Lenovo Launcher
+                        "com.zte.mifavor.launcher" // ZTE Launcher
                 )
+
+        val launcherRegex =
+                Regex(""".*\.launcher\d*$""") // Matches .launcher, .launcher3, .launcher10, etc.
+        val settingsRegex =
+                Regex(""".*\.settings\d*$""") // Matches .settings, .settings2, .settings10, etc.
+
+        return packageName in hardcodedLaunchers ||
+                launcherRegex.matches(packageName) ||
+                settingsRegex.matches(packageName)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -117,9 +133,9 @@ class AppLockAccessibilityService : AccessibilityService() {
             return
         }
         val packageName = event.packageName?.toString() ?: return
-        if (currentLockedApp == null) {
+        if (currentUnLockedApp == null) {
             if (packageName in lockedPackages) {
-                Log.d(TAG, "Setting current locked app: $packageName")
+                Log.d(TAG, "Setting current unlocked app: $packageName")
                 Handler(Looper.getMainLooper()).post { launchLockScreen(packageName) }
 
                 reconfigureService()
@@ -127,10 +143,10 @@ class AppLockAccessibilityService : AccessibilityService() {
             return
         }
         /**
-         * If the current locked app is the same as the package for which we received the event, we
-         * don't need to do anything.
+         * If the current unlocked app is the same as the package for which we received the event,
+         * we don't need to do anything.
          */
-        if (currentLockedApp == packageName) {
+        if (currentUnLockedApp == packageName) {
             // clear events that were launched to mark the app as locked
             clearPendingTasks()
             return
@@ -138,29 +154,29 @@ class AppLockAccessibilityService : AccessibilityService() {
 
         Log.d(
                 TAG,
-                "Full screen event from a non locked APP when we've already locked an APP ${event.toString()}"
+                "Full screen event from a non unlocked app when we've already locked an APP ${event.toString()}"
         )
-        if (packageName in lockedPackages && currentLockedApp != packageName) {
-            Log.d(TAG, "Setting current locked app: $packageName")
+        if (packageName in lockedPackages && currentUnLockedApp != packageName) {
+            Log.d(TAG, "Setting current unlocked app: $packageName")
             clearPendingTasks()
             Handler(Looper.getMainLooper()).post { launchLockScreen(packageName) }
             reconfigureService()
             return
         }
 
-        if (!isHomeOrSystemUI(packageName)) {
+        if (!isHomeOrSettings(packageName)) {
             Log.d(TAG, "Not a home or system UI, skipping")
             return
         }
         /**
-         * Mark the APP as locked again set currentLockedApp to null. Wait for some time to perform
-         * this operation to avoid cases when we switch back to the locked app and we're not sure if
-         * the user is in the lock screen or not.
+         * Mark the APP as locked again set currentUnLockedApp to null. Wait for some time to
+         * perform this operation to avoid cases when we switch back to the unlocked app and we're
+         * not sure if the user is in the lock screen or not.
          */
         val clearTask = Runnable {
-            if (currentLockedApp != null) {
-                Log.d(TAG, "Confirmed app switch away from: $currentLockedApp")
-                currentLockedApp = null
+            if (currentUnLockedApp != null) {
+                Log.d(TAG, "Confirmed app switch away from: $currentUnLockedApp")
+                currentUnLockedApp = null
                 reconfigureService()
             }
         }
