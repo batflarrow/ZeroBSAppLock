@@ -8,24 +8,54 @@ import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.fragment.app.FragmentActivity
+import com.batflarrow.zerobs.applock.auth.BiometricAuthHelper
 import com.batflarrow.zerobs.applock.service.AppLockAccessibilityService
 import com.batflarrow.zerobs.applock.ui.screens.AppListScreen
 import com.batflarrow.zerobs.applock.ui.theme.ZeroBSAppLockTheme
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private var accessibilityDialog: AlertDialog? = null
+    private lateinit var biometricAuthHelper: BiometricAuthHelper
+    private var isAuthenticated by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { ZeroBSAppLockTheme { AppListScreen() } }
+
+        biometricAuthHelper = BiometricAuthHelper(this)
+        biometricAuthHelper.registerForActivityResult(this)
+
+        setContent {
+            ZeroBSAppLockTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    if (isAuthenticated) {
+                        AppListScreen()
+                    } else {
+                        // Show loading indicator while waiting for authentication
+                        Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                        ) { CircularProgressIndicator() }
+                    }
+                }
+            }
+        }
     }
 
     override fun onResume() {
         super.onResume()
 
-        // Check if service is running and only show dialog if needed
+        // Check permissions first
         checkOverlayPermission()
         if (!isAccessibilityServiceEnabled()) {
             Log.d("MainActivity", "Accessibility service is NOT enabled")
@@ -36,12 +66,32 @@ class MainActivity : ComponentActivity() {
             accessibilityDialog?.dismiss()
             accessibilityDialog = null
         }
+        // Authenticate the user if not already authenticated
+        if (!isAuthenticated) {
+            authenticateUser()
+        }
+    }
+
+    private fun authenticateUser() {
+        biometricAuthHelper.showBiometricPrompt(
+                activity = this,
+                title = "Authenticate to access App Locker",
+                subtitle = "Biometric authentication required",
+                onSuccess = { isAuthenticated = true }
+        )
     }
 
     override fun onPause() {
         super.onPause()
         // Dismiss dialog when activity pauses to prevent it from showing again
         accessibilityDialog?.dismiss()
+        isAuthenticated = false
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Reset authentication when the app goes to background
+        isAuthenticated = false
     }
 
     private fun showAccessibilityServiceDialog() {
